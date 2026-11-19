@@ -1,23 +1,19 @@
-export const config = { runtime: "edge" };
-
-export default async function handler(req) {
-  const corsHeaders = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "*",
-    "Access-Control-Expose-Headers": "*",
-  };
+module.exports = async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "*");
+  res.setHeader("Access-Control-Expose-Headers", "*");
 
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: corsHeaders });
+    return res.status(204).end();
   }
 
-  const target = new URL(req.url).searchParams.get("url");
+  const target = req.query.url;
   if (!target) {
-    return new Response(
-      JSON.stringify({ ok: true, service: "ALVES PLAY Proxy CORS (Vercel)" }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } }
-    );
+    return res.status(200).json({
+      ok: true,
+      service: "ALVES PLAY Proxy CORS (Vercel)",
+    });
   }
 
   let targetUrl;
@@ -27,46 +23,46 @@ export default async function handler(req) {
       throw new Error("Protocolo inválido");
     }
   } catch {
-    return new Response(
-      JSON.stringify({ error: true, message: "URL de destino inválida." }),
-      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } }
-    );
+    return res.status(400).json({ error: true, message: "URL de destino inválida." });
   }
 
   const isBot = targetUrl.pathname.includes("/api/chatbot/") || req.method === "POST";
-  const forwardHeaders = new Headers({
+  const headers = {
     "User-Agent": isBot
       ? "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
       : "VLC/3.0.18 LibVLC/3.0.18",
-    "Accept": isBot ? "application/json, text/plain, */*" : "*/*",
-  });
+    Accept: isBot ? "application/json, text/plain, */*" : "*/*",
+  };
 
-  const incomingCt = req.headers.get("Content-Type");
-  if (req.method !== "GET" && req.method !== "HEAD" && incomingCt) {
-    forwardHeaders.set("Content-Type", incomingCt);
+  let body;
+  if (req.method !== "GET" && req.method !== "HEAD" && req.body !== undefined) {
+    if (typeof req.body === "string" || Buffer.isBuffer(req.body)) {
+      body = req.body;
+    } else {
+      body = JSON.stringify(req.body);
+    }
+    if (req.headers["content-type"]) {
+      headers["Content-Type"] = req.headers["content-type"];
+    }
   }
 
   try {
-    const body = req.method !== "GET" && req.method !== "HEAD" ? await req.arrayBuffer() : undefined;
     const upstream = await fetch(targetUrl.toString(), {
       method: req.method,
-      headers: forwardHeaders,
+      headers,
       body,
       redirect: "follow",
     });
 
-    const responseHeaders = new Headers(corsHeaders);
-    const upstreamCt = upstream.headers.get("Content-Type");
-    if (upstreamCt) responseHeaders.set("Content-Type", upstreamCt);
+    const ct = upstream.headers.get("content-type");
+    if (ct) res.setHeader("Content-Type", ct);
 
-    return new Response(upstream.body, {
-      status: upstream.status,
-      headers: responseHeaders,
-    });
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    return res.status(upstream.status).send(buffer);
   } catch (err) {
-    return new Response(
-      JSON.stringify({ error: true, message: "Falha no destino: " + err.message }),
-      { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } }
-    );
+    return res.status(502).json({
+      error: true,
+      message: "Falha no destino: " + err.message,
+    });
   }
-}
+};
